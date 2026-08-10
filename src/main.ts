@@ -2,6 +2,7 @@
 
 import { runStatusCommand } from "./cli/commands/status-command.js";
 import { printHelp } from "./cli/help.js";
+import { runInspectCommand } from "./cli/commands/inspect-command.js";
 /**
  * Argumentos enviados depois do nome do executável.
  *
@@ -24,6 +25,10 @@ const [command] = process.argv.slice(2);
 switch (command) {
   case "status":
     runStatusCommand();
+    break;
+
+  case "inspect":
+    await runInspectCommand();
     break;
 
   case "help":
