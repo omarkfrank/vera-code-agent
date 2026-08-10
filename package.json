@@ -1,0 +1,21 @@
+{
+  "name": "vera-code-agent",
+  "version": "0.1.0",
+  "description": "Agente de engenharia de software orientado à verificação, desenvolvido com Node.js e TypeScript.",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "Mark Frank",
+  "license": "MIT",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2"
+  }
+}
