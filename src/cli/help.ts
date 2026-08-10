@@ -6,7 +6,7 @@ export function printHelp(): void {
 VERA Code Agent
 
 Uso:
-  vera <comando>
+  vera [comando]
 
 Comandos:
   status    Exibe o estado operacional da VERA.

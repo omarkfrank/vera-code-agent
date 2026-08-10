@@ -1,6 +1,7 @@
+#!/usr/bin/env node
+
 import { runStatusCommand } from "./cli/commands/status-command.js";
 import { printHelp } from "./cli/help.js";
-
 /**
  * Argumentos enviados depois do nome do executável.
  *
