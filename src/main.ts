@@ -1,20 +1,41 @@
+import { runStatusCommand } from "./cli/commands/status-command.js";
+import { printHelp } from "./cli/help.js";
+
 /**
- * Ponto de entrada da aplicação VERA Code Agent.
+ * Argumentos enviados depois do nome do executável.
  *
- * Nesta primeira etapa, validamos a inicialização da aplicação
- * e o funcionamento da base TypeScript.
+ * Exemplo:
+ *
+ * npm run dev -- status
+ *
+ * process.argv:
+ * [
+ *   "caminho/node",
+ *   "caminho/main.ts",
+ *   "status"
+ * ]
+ *
+ * Após slice(2):
+ * ["status"]
  */
+const [command] = process.argv.slice(2);
 
-const AGENT_NAME = "VERA Code Agent";
-const AGENT_DESCRIPTION = "Verification-Driven Engineering Repository Agent";
+switch (command) {
+  case "status":
+    runStatusCommand();
+    break;
 
-console.log("");
-console.log("==============================================");
-console.log(`  ${AGENT_NAME}`);
-console.log(`  ${AGENT_DESCRIPTION}`);
-console.log("==============================================");
-console.log("");
-console.log("[STATUS] Sistemas principais operacionais.");
-console.log("[MODE]   Inicialização.");
-console.log("[READY]  Aguardando nova missão.");
-console.log("");
+  case "help":
+    printHelp();
+    break;
+
+  case undefined:
+    printHelp();
+    break;
+
+  default:
+    console.error(`[ERROR] Comando desconhecido: "${command}".`);
+    console.error('Use "vera help" para consultar os comandos disponíveis.');
+
+    process.exitCode = 1;
+}
