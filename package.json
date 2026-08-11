@@ -7,7 +7,8 @@
     "dev": "tsx src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --project tests/tsconfig.json --noEmit",
+    "test": "node --import=tsx --test tests/unit/technology-detector.test.ts"
   },
   "keywords": [],
   "author": "Mark Frank",
