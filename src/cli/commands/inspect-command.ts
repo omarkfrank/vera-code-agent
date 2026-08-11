@@ -1,41 +1,101 @@
 import { inspectRepository } from "../../inspection/repository-inspector.js";
 
 /**
+ * Opções atualmente suportadas pelo comando `inspect`.
+ *
+ * A lista permanece explícita para impedir que argumentos
+ * desconhecidos sejam aceitos silenciosamente pela CLI.
+ */
+const SUPPORTED_OPTIONS = new Set(["--json"]);
+
+/**
  * Executa o comando `vera inspect`.
  *
- * A responsabilidade desta camada é limitada a:
+ * Responsabilidades desta camada:
  *
- * - solicitar a inspeção do diretório atual;
- * - apresentar o resultado no terminal;
+ * - interpretar os argumentos específicos do comando;
+ * - validar opções desconhecidas;
+ * - solicitar a inspeção estruturada do repositório;
+ * - apresentar o resultado para humanos ou em JSON;
  * - transformar falhas técnicas em mensagens adequadas
- *   para quem está utilizando a CLI.
+ *   para quem utiliza a CLI.
  *
  * Toda a lógica responsável por compreender o repositório
- * pertence ao módulo de inspeção.
+ * permanece isolada no RepositoryInspector.
+ *
+ * @param args Argumentos adicionais recebidos pelo comando.
  */
-export async function runInspectCommand(): Promise<void> {
+export async function runInspectCommand(
+  args: readonly string[] = [],
+): Promise<void> {
   const currentDirectory = process.cwd();
 
-  console.log("");
-  console.log("[INSPECT] Analisando repositório...");
-  console.log("");
+  /**
+   * Procura a primeira opção que ainda não seja
+   * reconhecida pelo comando.
+   *
+   * Exemplo inválido:
+   * vera inspect --jsno
+   */
+  const unknownOption = args.find(
+    (argument) => !SUPPORTED_OPTIONS.has(argument),
+  );
+
+  if (unknownOption !== undefined) {
+    console.error(
+      `[ERROR] Opção desconhecida para inspect: "${unknownOption}".`,
+    );
+
+    console.error('Use "vera help" para consultar as opções disponíveis.');
+
+    process.exitCode = 1;
+    return;
+  }
+
+  /**
+   * Define se a saída deverá ser produzida
+   * como JSON estruturado.
+   */
+  const jsonOutput = args.includes("--json");
+
+  /**
+   * No modo JSON, nenhuma mensagem adicional deve
+   * ser enviada para stdout.
+   *
+   * Isso garante que o resultado possa ser consumido
+   * diretamente por scripts e outras ferramentas.
+   */
+  if (!jsonOutput) {
+    console.log("");
+    console.log("[INSPECT] Analisando repositório...");
+    console.log("");
+  }
 
   try {
     /**
-     * O comando não precisa conhecer detalhes sobre
-     * package.json, filesystem ou detectores individuais.
-     *
-     * Ele apenas solicita a inspeção.
+     * O RepositoryInspector retorna dados estruturados
+     * independentes do formato de apresentação.
      */
     const inspection = await inspectRepository(currentDirectory);
 
+    /**
+     * Saída estruturada destinada a automações,
+     * integrações e futuras operações internas da VERA.
+     */
+    if (jsonOutput) {
+      console.log(JSON.stringify(inspection, null, 2));
+
+      return;
+    }
+
+    /**
+     * A partir deste ponto temos somente
+     * a apresentação destinada ao usuário humano.
+     */
     console.log(`Diretório: ${inspection.directory}`);
 
     console.log("");
 
-    /**
-     * Informações gerais do projeto.
-     */
     console.log("Projeto:");
 
     console.log(`  Nome: ${inspection.project.name ?? "não informado"}`);
@@ -51,7 +111,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Scripts identificados no package.json.
+     * Scripts encontrados no package.json.
      */
     console.log("Scripts:");
 
@@ -81,7 +141,8 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Arquivos de configuração identificados.
+     * Arquivos de configuração reconhecidos
+     * durante a inspeção do repositório.
      */
     console.log("Arquivos de configuração:");
 
@@ -96,7 +157,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Informações iniciais do Git.
+     * Informações iniciais sobre Git.
      */
     console.log("Git:");
 
@@ -125,7 +186,7 @@ export async function runInspectCommand(): Promise<void> {
     }
 
     /**
-     * package.json encontrado, porém contendo
+     * package.json encontrado, mas contendo
      * sintaxe JSON inválida.
      */
     if (error instanceof SyntaxError) {
@@ -136,8 +197,7 @@ export async function runInspectCommand(): Promise<void> {
     }
 
     /**
-     * Qualquer falha não prevista permanece explícita
-     * sem expor detalhes internos desnecessários.
+     * Fallback para qualquer falha não prevista.
      */
     console.error("[ERROR] Não foi possível inspecionar o projeto.");
 

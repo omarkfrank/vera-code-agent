@@ -1,34 +1,37 @@
 #!/usr/bin/env node
 
+import { runInspectCommand } from "./cli/commands/inspect-command.js";
 import { runStatusCommand } from "./cli/commands/status-command.js";
 import { printHelp } from "./cli/help.js";
-import { runInspectCommand } from "./cli/commands/inspect-command.js";
+
 /**
- * Argumentos enviados depois do nome do executável.
+ * Argumentos recebidos pela CLI.
  *
  * Exemplo:
  *
- * npm run dev -- status
+ * vera inspect --json
  *
- * process.argv:
- * [
- *   "caminho/node",
- *   "caminho/main.ts",
- *   "status"
- * ]
+ * Após remover os dois primeiros argumentos internos do Node:
  *
- * Após slice(2):
- * ["status"]
+ * command = "inspect"
+ * commandArguments = ["--json"]
  */
-const [command] = process.argv.slice(2);
+const [command, ...commandArguments] = process.argv.slice(2);
 
+/**
+ * Direciona a execução para o comando solicitado.
+ *
+ * O arquivo principal conhece apenas os comandos disponíveis.
+ * As regras específicas de cada comando permanecem isoladas
+ * em seus próprios módulos.
+ */
 switch (command) {
   case "status":
     runStatusCommand();
     break;
 
   case "inspect":
-    await runInspectCommand();
+    await runInspectCommand(commandArguments);
     break;
 
   case "help":
@@ -41,6 +44,7 @@ switch (command) {
 
   default:
     console.error(`[ERROR] Comando desconhecido: "${command}".`);
+
     console.error('Use "vera help" para consultar os comandos disponíveis.');
 
     process.exitCode = 1;
