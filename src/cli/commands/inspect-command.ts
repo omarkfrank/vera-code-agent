@@ -1,15 +1,15 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { detectPackageManager } from "../../inspection/package-manager-detector.js";
 import { detectTechnologies } from "../../inspection/technology-detector.js";
 
 /**
  * Estrutura dos principais campos do package.json
- * utilizados durante a inspeção inicial do projeto.
+ * utilizados durante a inspeção do projeto.
  *
- * Os campos são opcionais porque a VERA deve conseguir
- * lidar com projetos incompletos ou manifests parcialmente
- * configurados sem interromper a inspeção imediatamente.
+ * Os campos são opcionais porque nem todo package.json
+ * precisa obrigatoriamente declarar todas essas informações.
  */
 interface PackageJson {
   name?: string;
@@ -22,12 +22,12 @@ interface PackageJson {
 }
 
 /**
- * Verifica se um determinado arquivo ou diretório existe.
+ * Verifica se determinado arquivo ou diretório existe.
  *
- * A operação é somente leitura e não altera nenhuma
- * informação dentro do repositório analisado.
+ * A função executa somente leitura e não modifica
+ * nenhuma informação do repositório analisado.
  *
- * @param path Caminho absoluto ou relativo a ser verificado.
+ * @param path Caminho que deverá ser verificado.
  * @returns true quando o caminho existe; false caso contrário.
  */
 async function pathExists(path: string): Promise<boolean> {
@@ -40,53 +40,16 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 /**
- * Identifica o gerenciador de pacotes utilizado pelo projeto.
+ * Identifica arquivos conhecidos existentes na raiz
+ * do repositório.
  *
- * A prioridade de detecção é:
+ * Esses arquivos possuem duas responsabilidades:
  *
- * 1. Campo "packageManager" do package.json;
- * 2. Arquivo de lock presente na raiz do projeto.
+ * 1. compor o diagnóstico apresentado ao usuário;
+ * 2. fornecer evidências para outros detectores da VERA.
  *
- * Dessa forma, a VERA utiliza primeiro uma declaração
- * explícita e recorre ao sistema de arquivos como fallback.
- */
-async function detectPackageManager(
-  directory: string,
-  packageManager?: string,
-): Promise<string> {
-  if (packageManager) {
-    return packageManager.split("@")[0] ?? packageManager;
-  }
-
-  if (await pathExists(join(directory, "package-lock.json"))) {
-    return "npm";
-  }
-
-  if (await pathExists(join(directory, "pnpm-lock.yaml"))) {
-    return "pnpm";
-  }
-
-  if (await pathExists(join(directory, "yarn.lock"))) {
-    return "yarn";
-  }
-
-  if (
-    (await pathExists(join(directory, "bun.lock"))) ||
-    (await pathExists(join(directory, "bun.lockb")))
-  ) {
-    return "bun";
-  }
-
-  return "não identificado";
-}
-
-/**
- * Identifica arquivos de configuração relevantes existentes
- * na raiz do repositório.
- *
- * Esta lista representa apenas os arquivos reconhecidos
- * atualmente pela VERA e poderá ser ampliada conforme
- * novos ecossistemas forem suportados.
+ * Por exemplo, package-lock.json pode indicar que
+ * o projeto utiliza npm.
  */
 async function detectConfigurationFiles(directory: string): Promise<string[]> {
   const candidates = [
@@ -119,23 +82,23 @@ async function detectConfigurationFiles(directory: string): Promise<string[]> {
 }
 
 /**
- * Executa a inspeção inicial do diretório atual.
+ * Executa a inspeção do diretório atual.
  *
- * Responsabilidades deste comando:
+ * Responsabilidades:
  *
  * - localizar e ler o package.json;
- * - identificar informações gerais do projeto;
- * - descobrir o gerenciador de pacotes;
- * - solicitar a detecção de tecnologias;
- * - identificar arquivos de configuração;
- * - verificar a existência de um repositório Git;
+ * - coletar informações básicas do projeto;
+ * - identificar arquivos conhecidos;
+ * - delegar a detecção do gerenciador de pacotes;
+ * - delegar a detecção das tecnologias;
+ * - verificar a presença de um repositório Git;
  * - apresentar o diagnóstico no terminal.
  *
  * A operação é estritamente somente leitura.
- * Nenhum arquivo ou configuração do projeto analisado é alterado.
  */
 export async function runInspectCommand(): Promise<void> {
   const currentDirectory = process.cwd();
+
   const packageJsonPath = join(currentDirectory, "package.json");
 
   console.log("");
@@ -144,9 +107,10 @@ export async function runInspectCommand(): Promise<void> {
 
   try {
     /**
-     * Lemos o package.json como texto antes de convertê-lo.
+     * O package.json é lido inicialmente como texto.
      *
-     * Essa abordagem nos permite tratar separadamente:
+     * Dessa forma conseguimos diferenciar:
+     *
      * - arquivo inexistente;
      * - JSON inválido;
      * - outros erros inesperados.
@@ -156,34 +120,58 @@ export async function runInspectCommand(): Promise<void> {
     const packageJson = JSON.parse(packageJsonContent) as PackageJson;
 
     /**
-     * As diferentes informações do projeto são obtidas
-     * por componentes especializados.
+     * Primeiro coletamos os arquivos conhecidos.
      *
-     * A detecção de tecnologias, por exemplo, já foi
-     * extraída para um módulo próprio.
+     * Essa informação será reutilizada pelos detectores,
+     * evitando acessos desnecessários ao filesystem.
      */
-    const packageManager = await detectPackageManager(
-      currentDirectory,
-      packageJson.packageManager,
-    );
-
-    const technologies = detectTechnologies(packageJson);
-
     const configurationFiles = await detectConfigurationFiles(currentDirectory);
 
+    /**
+     * Com exactOptionalPropertyTypes habilitado,
+     * uma propriedade opcional não deve ser enviada
+     * explicitamente com valor undefined.
+     *
+     * Portanto, declaredPackageManager somente será
+     * incluído no objeto quando realmente existir
+     * no package.json.
+     */
+    const packageManager = detectPackageManager({
+      files: configurationFiles,
+
+      ...(packageJson.packageManager !== undefined
+        ? {
+            declaredPackageManager: packageJson.packageManager,
+          }
+        : {}),
+    });
+
+    /**
+     * A lógica responsável por reconhecer tecnologias
+     * permanece isolada no detector especializado.
+     */
+    const technologies = detectTechnologies(packageJson);
+
+    /**
+     * Nesta etapa, a existência da pasta .git
+     * é suficiente para identificar um repositório Git.
+     */
     const hasGitRepository = await pathExists(join(currentDirectory, ".git"));
 
     const scripts = Object.keys(packageJson.scripts ?? {});
 
     /**
-     * Apresentação das informações gerais do projeto.
+     * Informações gerais do projeto.
      */
     console.log(`Diretório: ${currentDirectory}`);
     console.log("");
 
     console.log("Projeto:");
+
     console.log(`  Nome: ${packageJson.name ?? "não informado"}`);
+
     console.log(`  Versão: ${packageJson.version ?? "não informada"}`);
+
     console.log("  Runtime: Node.js");
 
     console.log(
@@ -191,10 +179,11 @@ export async function runInspectCommand(): Promise<void> {
     );
 
     console.log(`  Gerenciador: ${packageManager}`);
+
     console.log("");
 
     /**
-     * Scripts disponíveis no package.json.
+     * Scripts encontrados no package.json.
      */
     console.log("Scripts:");
 
@@ -209,8 +198,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Tecnologias reconhecidas a partir das dependências
-     * declaradas no package.json.
+     * Tecnologias reconhecidas pela VERA.
      */
     console.log("Tecnologias detectadas:");
 
@@ -225,8 +213,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Arquivos de configuração conhecidos encontrados
-     * na raiz do projeto.
+     * Arquivos de configuração conhecidos.
      */
     console.log("Arquivos de configuração:");
 
@@ -241,7 +228,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Verificação básica da presença do diretório .git.
+     * Informações básicas do Git.
      */
     console.log("Git:");
 
@@ -258,10 +245,11 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
   } catch (error: unknown) {
     /**
-     * Tratamento específico para ausência do package.json.
+     * Diretório sem package.json.
      */
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       console.error("[ERROR] package.json não encontrado.");
+
       console.error(`Diretório analisado: ${currentDirectory}`);
 
       process.exitCode = 1;
@@ -269,8 +257,8 @@ export async function runInspectCommand(): Promise<void> {
     }
 
     /**
-     * JSON.parse lança SyntaxError quando o conteúdo
-     * do package.json não representa um JSON válido.
+     * package.json encontrado, porém contendo
+     * sintaxe JSON inválida.
      */
     if (error instanceof SyntaxError) {
       console.error("[ERROR] package.json contém JSON inválido.");
@@ -280,10 +268,7 @@ export async function runInspectCommand(): Promise<void> {
     }
 
     /**
-     * Fallback para qualquer condição inesperada.
-     *
-     * Evitamos expor detalhes internos desnecessários
-     * nesta fase inicial da CLI.
+     * Fallback para falhas inesperadas.
      */
     console.error("[ERROR] Não foi possível inspecionar o projeto.");
 
