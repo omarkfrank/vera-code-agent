@@ -1,6 +1,7 @@
-import { access, readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { detectConfigurationFiles } from "../../inspection/configuration-file-detector.js";
 import { detectPackageManager } from "../../inspection/package-manager-detector.js";
 import { detectTechnologies } from "../../inspection/technology-detector.js";
 
@@ -8,8 +9,9 @@ import { detectTechnologies } from "../../inspection/technology-detector.js";
  * Estrutura dos principais campos do package.json
  * utilizados durante a inspeção do projeto.
  *
- * Os campos são opcionais porque nem todo package.json
- * precisa obrigatoriamente declarar todas essas informações.
+ * Os campos são opcionais porque a VERA deve conseguir
+ * analisar manifests parcialmente configurados sem assumir
+ * que todas as propriedades estarão presentes.
  */
 interface PackageJson {
   name?: string;
@@ -22,79 +24,20 @@ interface PackageJson {
 }
 
 /**
- * Verifica se determinado arquivo ou diretório existe.
- *
- * A função executa somente leitura e não modifica
- * nenhuma informação do repositório analisado.
- *
- * @param path Caminho que deverá ser verificado.
- * @returns true quando o caminho existe; false caso contrário.
- */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Identifica arquivos conhecidos existentes na raiz
- * do repositório.
- *
- * Esses arquivos possuem duas responsabilidades:
- *
- * 1. compor o diagnóstico apresentado ao usuário;
- * 2. fornecer evidências para outros detectores da VERA.
- *
- * Por exemplo, package-lock.json pode indicar que
- * o projeto utiliza npm.
- */
-async function detectConfigurationFiles(directory: string): Promise<string[]> {
-  const candidates = [
-    "package.json",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "bun.lock",
-    "bun.lockb",
-    "tsconfig.json",
-    "eslint.config.js",
-    "eslint.config.mjs",
-    "eslint.config.ts",
-    "prettier.config.js",
-    "prettier.config.mjs",
-    ".prettierrc",
-    ".gitignore",
-    ".env.example",
-  ];
-
-  const detectedFiles: string[] = [];
-
-  for (const candidate of candidates) {
-    if (await pathExists(join(directory, candidate))) {
-      detectedFiles.push(candidate);
-    }
-  }
-
-  return detectedFiles;
-}
-
-/**
  * Executa a inspeção do diretório atual.
  *
- * Responsabilidades:
+ * Responsabilidades deste comando:
  *
  * - localizar e ler o package.json;
- * - coletar informações básicas do projeto;
- * - identificar arquivos conhecidos;
+ * - coletar os nomes existentes na raiz do projeto;
+ * - delegar a detecção dos arquivos de configuração;
  * - delegar a detecção do gerenciador de pacotes;
  * - delegar a detecção das tecnologias;
- * - verificar a presença de um repositório Git;
+ * - verificar a presença do diretório .git;
  * - apresentar o diagnóstico no terminal.
  *
- * A operação é estritamente somente leitura.
+ * O comando atua somente em modo leitura.
+ * Nenhum arquivo do repositório analisado é modificado.
  */
 export async function runInspectCommand(): Promise<void> {
   const currentDirectory = process.cwd();
@@ -109,32 +52,39 @@ export async function runInspectCommand(): Promise<void> {
     /**
      * O package.json é lido inicialmente como texto.
      *
-     * Dessa forma conseguimos diferenciar:
-     *
+     * Isso permite tratar separadamente:
      * - arquivo inexistente;
      * - JSON inválido;
-     * - outros erros inesperados.
+     * - falhas inesperadas.
      */
     const packageJsonContent = await readFile(packageJsonPath, "utf-8");
 
     const packageJson = JSON.parse(packageJsonContent) as PackageJson;
 
     /**
-     * Primeiro coletamos os arquivos conhecidos.
+     * Coletamos a raiz do repositório apenas uma vez.
      *
-     * Essa informação será reutilizada pelos detectores,
-     * evitando acessos desnecessários ao filesystem.
+     * Os nomes encontrados poderão alimentar diferentes
+     * detectores sem provocar múltiplas consultas ao filesystem.
      */
-    const configurationFiles = await detectConfigurationFiles(currentDirectory);
+    const rootEntries = await readdir(currentDirectory, {
+      withFileTypes: true,
+    });
+
+    const rootEntryNames = rootEntries.map((entry) => entry.name);
 
     /**
-     * Com exactOptionalPropertyTypes habilitado,
-     * uma propriedade opcional não deve ser enviada
-     * explicitamente com valor undefined.
+     * A regra que define quais arquivos são relevantes
+     * pertence agora a um detector especializado.
+     */
+    const configurationFiles = detectConfigurationFiles(rootEntryNames);
+
+    /**
+     * O detector recebe somente as evidências necessárias.
      *
-     * Portanto, declaredPackageManager somente será
-     * incluído no objeto quando realmente existir
-     * no package.json.
+     * Com exactOptionalPropertyTypes habilitado,
+     * declaredPackageManager só é incluído quando existe
+     * realmente uma string declarada no package.json.
      */
     const packageManager = detectPackageManager({
       files: configurationFiles,
@@ -147,25 +97,25 @@ export async function runInspectCommand(): Promise<void> {
     });
 
     /**
-     * A lógica responsável por reconhecer tecnologias
-     * permanece isolada no detector especializado.
+     * A identificação das tecnologias continua isolada
+     * em seu próprio componente.
      */
     const technologies = detectTechnologies(packageJson);
 
     /**
-     * Nesta etapa, a existência da pasta .git
-     * é suficiente para identificar um repositório Git.
+     * Como a raiz já foi consultada, não precisamos realizar
+     * um segundo acesso apenas para procurar o diretório .git.
      */
-    const hasGitRepository = await pathExists(join(currentDirectory, ".git"));
+    const hasGitRepository = rootEntryNames.includes(".git");
 
     const scripts = Object.keys(packageJson.scripts ?? {});
+
+    console.log(`Diretório: ${currentDirectory}`);
+    console.log("");
 
     /**
      * Informações gerais do projeto.
      */
-    console.log(`Diretório: ${currentDirectory}`);
-    console.log("");
-
     console.log("Projeto:");
 
     console.log(`  Nome: ${packageJson.name ?? "não informado"}`);
@@ -183,7 +133,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Scripts encontrados no package.json.
+     * Scripts disponíveis no package.json.
      */
     console.log("Scripts:");
 
@@ -198,7 +148,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Tecnologias reconhecidas pela VERA.
+     * Tecnologias reconhecidas nas dependências.
      */
     console.log("Tecnologias detectadas:");
 
@@ -213,7 +163,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Arquivos de configuração conhecidos.
+     * Arquivos conhecidos existentes na raiz.
      */
     console.log("Arquivos de configuração:");
 
@@ -228,7 +178,8 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
 
     /**
-     * Informações básicas do Git.
+     * Nesta fase, a presença de .git na raiz é suficiente
+     * para indicar que estamos dentro de um repositório Git.
      */
     console.log("Git:");
 
@@ -245,7 +196,7 @@ export async function runInspectCommand(): Promise<void> {
     console.log("");
   } catch (error: unknown) {
     /**
-     * Diretório sem package.json.
+     * O diretório não possui package.json.
      */
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       console.error("[ERROR] package.json não encontrado.");
@@ -257,8 +208,7 @@ export async function runInspectCommand(): Promise<void> {
     }
 
     /**
-     * package.json encontrado, porém contendo
-     * sintaxe JSON inválida.
+     * O arquivo existe, porém não contém JSON válido.
      */
     if (error instanceof SyntaxError) {
       console.error("[ERROR] package.json contém JSON inválido.");
@@ -268,7 +218,7 @@ export async function runInspectCommand(): Promise<void> {
     }
 
     /**
-     * Fallback para falhas inesperadas.
+     * Fallback para qualquer falha inesperada.
      */
     console.error("[ERROR] Não foi possível inspecionar o projeto.");
 
