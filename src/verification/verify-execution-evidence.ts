@@ -7,26 +7,13 @@ import type {
 
 /**
  * Avalia deterministicamente as evidências
- * produzidas por uma MissionExecution.
- *
- * Esta função não altera estado da missão.
- *
- * Ela somente responde:
- *
- * "As evidências desta execução são suficientes
- *  e consistentes para aprovar a missão?"
+ * produzidas pela execução.
  */
 export function verifyExecutionEvidence(
   execution: MissionExecution,
 ): MissionVerification {
   const checks: VerificationCheck[] = [];
 
-  /**
-   * CHECK 1
-   *
-   * Apenas uma execução operacionalmente concluída
-   * pode ser aprovada pela fase de verificação.
-   */
   checks.push({
     id: "execution-completed",
 
@@ -38,12 +25,6 @@ export function verifyExecutionEvidence(
         : `A execução não está concluída. Status atual: ${execution.status}.`,
   });
 
-  /**
-   * CHECK 2
-   *
-   * Uma execução válida precisa possuir
-   * pelo menos uma ação registrada.
-   */
   checks.push({
     id: "actions-present",
 
@@ -56,10 +37,8 @@ export function verifyExecutionEvidence(
   });
 
   /**
-   * CHECK 3
-   *
    * Cada ação precisa possuir exatamente
-   * uma evidência correspondente.
+   * um resultado correspondente.
    */
   const everyActionHasSingleResult = execution.actions.every(
     (action) =>
@@ -78,10 +57,7 @@ export function verifyExecutionEvidence(
   });
 
   /**
-   * CHECK 4
-   *
-   * Não podem existir evidências associadas
-   * a ações desconhecidas.
+   * Resultados órfãos são proibidos.
    */
   const noOrphanResults = execution.results.every((result) =>
     execution.actions.some((action) => action.id === result.actionId),
@@ -98,9 +74,7 @@ export function verifyExecutionEvidence(
   });
 
   /**
-   * CHECK 5
-   *
-   * Todas as evidências precisam pertencer
+   * Todo resultado precisa pertencer
    * à própria execução.
    */
   const resultsBelongToExecution = execution.results.every(
@@ -118,10 +92,8 @@ export function verifyExecutionEvidence(
   });
 
   /**
-   * CHECK 6
-   *
-   * Para aprovação, todas as ações precisam
-   * possuir resultado `success`.
+   * Todas as ações precisam ter terminado
+   * com sucesso para aprovação.
    */
   const allResultsSuccessful =
     execution.results.length > 0 &&
@@ -138,41 +110,55 @@ export function verifyExecutionEvidence(
   });
 
   /**
-   * CHECK 7
+   * Determinamos quais arquivos legitimamente
+   * deveriam aparecer em affectedFiles.
    *
-   * Enquanto a VERA possui somente capacidade
-   * operacional `read`, nenhum arquivo pode
-   * aparecer como modificado.
-   *
-   * Quando create/update forem liberados,
-   * esta política poderá evoluir para considerar
-   * os tipos das ações registradas.
+   * Somente Create Actions concluídas com
+   * resultado success podem produzir mutação.
    */
-  const onlyReadActions = execution.actions.every(
-    (action) => action.type === "read",
-  );
+  const successfulCreateTargets = execution.actions
+    .filter((action) => action.type === "create")
+    .filter((action) =>
+      execution.results.some(
+        (result) =>
+          result.actionId === action.id && result.status === "success",
+      ),
+    )
+    .map((action) => action.target);
 
-  const readOnlyIntegrity =
-    !onlyReadActions || execution.affectedFiles.length === 0;
+  const expectedAffectedFiles = new Set(successfulCreateTargets);
 
-  checks.push({
-    id: "read-only-integrity",
-
-    status: readOnlyIntegrity ? "passed" : "failed",
-
-    message: readOnlyIntegrity
-      ? "A integridade da execução read-only foi preservada."
-      : "Uma execução exclusivamente read registrou arquivos modificados.",
-  });
+  const actualAffectedFiles = new Set(execution.affectedFiles);
 
   /**
-   * A verificação somente passa quando
-   * TODOS os critérios determinísticos passam.
+   * Duplicatas também representam
+   * inconsistência de evidência.
    */
+  const noAffectedFileDuplicates =
+    actualAffectedFiles.size === execution.affectedFiles.length;
+
+  const affectedFilesMatch =
+    noAffectedFileDuplicates &&
+    expectedAffectedFiles.size === actualAffectedFiles.size &&
+    [...expectedAffectedFiles].every((target) =>
+      actualAffectedFiles.has(target),
+    );
+
+  checks.push({
+    id: "affected-files-integrity",
+
+    status: affectedFilesMatch ? "passed" : "failed",
+
+    message: affectedFilesMatch
+      ? "Os arquivos afetados correspondem às Create Actions concluídas com sucesso."
+      : "Os arquivos afetados não correspondem às mutações autorizadas pela execução.",
+  });
+
   const verificationPassed = checks.every((check) => check.status === "passed");
 
   return {
     missionId: execution.missionId,
+
     executionId: execution.id,
 
     status: verificationPassed ? "passed" : "failed",
