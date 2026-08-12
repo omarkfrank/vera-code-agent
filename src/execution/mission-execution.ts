@@ -1,20 +1,33 @@
 /**
- * Estado atual de uma execução de missão.
+ * Estado operacional de uma execução de missão.
  *
- * Nesta etapa suportamos somente "prepared".
+ * prepared:
+ * a execução foi criada e pode receber ações.
  *
- * Novos estados serão introduzidos quando
- * construirmos a Execution Workflow.
+ * executing:
+ * as ações registradas estão sendo processadas.
+ *
+ * completed:
+ * todas as ações foram executadas com sucesso e
+ * a missão pode avançar para verificação.
+ *
+ * failed:
+ * uma operação falhou e a execução foi interrompida.
  */
-export type MissionExecutionStatus = "prepared";
+export type MissionExecutionStatus =
+  | "prepared"
+  | "executing"
+  | "completed"
+  | "failed";
 
 /**
- * Tipos de ações que poderão existir
- * dentro da camada de execução.
+ * Tipos de ações conhecidos pelo contrato
+ * da camada de execução.
  *
- * Embora o contrato já conheça outros tipos,
- * somente `read` possui autorização operacional
- * neste estágio do projeto.
+ * Conhecer um tipo não significa autorizá-lo.
+ *
+ * Atualmente somente `read` possui autorização
+ * operacional.
  */
 export type ExecutionActionType =
   | "read"
@@ -29,60 +42,57 @@ export type ExecutionActionType =
  */
 export interface ExecutionAction {
   /**
-   * Identificador da execução proprietária
-   * desta ação.
-   *
-   * Esse vínculo impede que uma ação preparada
-   * para uma execução seja registrada em outra.
+   * Execução proprietária da ação.
    */
   executionId: string;
 
   /**
-   * Identificador único da própria ação.
+   * Identificador exclusivo da ação.
    */
   id: string;
 
   /**
-   * Ordem da ação dentro da execução.
+   * Ordem operacional.
    */
   order: number;
 
   /**
-   * Categoria operacional.
+   * Categoria da ação.
    */
   type: ExecutionActionType;
 
   /**
-   * Descrição humana e técnica da operação.
+   * Descrição humana e técnica.
    */
   description: string;
 
   /**
-   * Recurso alvo da operação.
-   *
-   * Para ações sobre arquivos, representa
-   * um caminho relativo à raiz do repositório.
+   * Recurso alvo.
    */
   target: string | null;
 }
 
 /**
- * Resultado possível de uma ação executada.
+ * Resultado operacional possível.
  */
 export type ExecutionActionResultStatus = "success" | "failure" | "skipped";
 
 /**
- * Evidência produzida depois da execução
- * de uma ação individual.
+ * Evidência produzida por uma ação.
  */
 export interface ExecutionActionResult {
+  /**
+   * Execução que produziu o resultado.
+   */
+  executionId: string;
+
   /**
    * Ação responsável pelo resultado.
    */
   actionId: string;
 
   /**
-   * Resultado operacional.
+   * Estado da operação.
    */
   status: ExecutionActionResultStatus;
 
@@ -102,21 +112,14 @@ export interface ReadExecutionActionResult extends ExecutionActionResult {
   target: string;
 
   /**
-   * Conteúdo textual encontrado no arquivo.
+   * Conteúdo textual lido.
    */
   content: string;
 }
 
 /**
- * Representa uma execução preparada
- * para uma missão.
- *
- * MissionPlan:
- * descreve o que deve ser feito.
- *
- * MissionExecution:
- * registra como as operações serão preparadas,
- * executadas e posteriormente verificadas.
+ * Representa uma execução associada
+ * a uma missão da VERA.
  */
 export interface MissionExecution {
   /**
@@ -125,35 +128,34 @@ export interface MissionExecution {
   id: string;
 
   /**
-   * Missão associada à execução.
+   * Missão proprietária da execução.
    */
   missionId: string;
 
   /**
-   * Estado atual.
+   * Estado operacional atual.
    */
   status: MissionExecutionStatus;
 
   /**
-   * Momento da preparação em ISO 8601.
+   * Momento de preparação em ISO 8601.
    */
   preparedAt: string;
 
   /**
-   * Operações formalmente registradas
-   * dentro desta execução.
+   * Ações formalmente registradas.
    */
   actions: ExecutionAction[];
 
   /**
-   * Arquivos modificados pela execução.
+   * Arquivos modificados.
    *
    * Read Actions não adicionam itens aqui.
    */
   affectedFiles: string[];
 
   /**
-   * Evidências produzidas pelas operações.
+   * Evidências produzidas pelas ações.
    */
   results: ExecutionActionResult[];
 }

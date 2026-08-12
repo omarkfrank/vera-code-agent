@@ -8,20 +8,16 @@ import type {
 import { resolveProtectedRepositoryPath } from "./repository-path.js";
 
 /**
- * Limite inicial de segurança para leitura textual.
+ * Limite máximo inicial permitido
+ * para leitura textual.
  *
- * Um agente de código normalmente precisa compreender
- * código-fonte e arquivos de configuração, não carregar
- * arquivos arbitrariamente grandes em memória.
- *
- * 1 MiB por arquivo é suficiente para esta etapa
- * inicial e poderá futuramente ser configurável.
+ * 1 MiB.
  */
 export const MAX_READ_FILE_SIZE_BYTES = 1024 * 1024;
 
 /**
- * Erro utilizado quando a operação recebida não
- * representa uma Read Action válida.
+ * Erro utilizado quando a operação recebida
+ * não representa uma Read Action válida.
  */
 export class InvalidReadExecutionActionError extends Error {
   public constructor(message: string) {
@@ -32,8 +28,8 @@ export class InvalidReadExecutionActionError extends Error {
 }
 
 /**
- * Erro relacionado ao conteúdo ou às propriedades
- * do recurso que está sendo lido.
+ * Erro relacionado ao recurso que
+ * está sendo lido.
  */
 export class RepositoryReadError extends Error {
   public constructor(message: string) {
@@ -46,20 +42,15 @@ export class RepositoryReadError extends Error {
 /**
  * Executa uma ação protegida de leitura.
  *
- * Garantias atuais:
+ * Garantias:
  *
- * - aceita somente ações do tipo `read`;
- * - exige alvo definido;
- * - impede caminhos absolutos;
- * - impede traversal para fora do repositório;
- * - valida o caminho físico real;
+ * - aceita somente `read`;
+ * - exige alvo;
+ * - respeita a fronteira do repositório;
  * - aceita somente arquivos regulares;
- * - limita o tamanho máximo da leitura;
+ * - limita tamanho;
  * - rejeita conteúdo aparentemente binário;
- * - não modifica nenhum recurso.
- *
- * @param repositoryRoot Raiz autorizada do repositório.
- * @param action Ação de leitura previamente criada.
+ * - nunca modifica o filesystem.
  */
 export async function executeReadAction(
   repositoryRoot: string,
@@ -77,10 +68,6 @@ export async function executeReadAction(
     );
   }
 
-  /**
-   * Esta chamada representa nossa principal
-   * fronteira de segurança de filesystem.
-   */
   const protectedPath = await resolveProtectedRepositoryPath(
     repositoryRoot,
     action.target,
@@ -88,35 +75,23 @@ export async function executeReadAction(
 
   const fileStats = await stat(protectedPath);
 
-  /**
-   * Diretórios e outros tipos de recurso não
-   * fazem parte desta capacidade inicial.
-   */
   if (!fileStats.isFile()) {
     throw new RepositoryReadError(
       "A ação de leitura aceita somente arquivos regulares.",
     );
   }
 
-  /**
-   * Evitamos carregar arquivos excessivamente
-   * grandes durante a análise.
-   */
   if (fileStats.size > MAX_READ_FILE_SIZE_BYTES) {
     throw new RepositoryReadError(
       `O arquivo excede o limite de ${MAX_READ_FILE_SIZE_BYTES} bytes permitido para leitura.`,
     );
   }
 
-  /**
-   * Nesta fase a VERA trabalha exclusivamente
-   * com arquivos textuais UTF-8.
-   */
   const content = await readFile(protectedPath, "utf-8");
 
   /**
-   * Bytes nulos são uma heurística simples para
-   * evitar tratar arquivos binários como código-fonte.
+   * Byte nulo é utilizado como heurística simples
+   * para identificar conteúdo aparentemente binário.
    */
   if (content.includes("\u0000")) {
     throw new RepositoryReadError(
@@ -125,6 +100,7 @@ export async function executeReadAction(
   }
 
   return {
+    executionId: action.executionId,
     actionId: action.id,
     status: "success",
     message: "Arquivo lido com sucesso.",
