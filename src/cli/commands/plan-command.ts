@@ -1,18 +1,26 @@
 import { createRepositoryMission } from "../../mission/create-repository-mission.js";
-import { createMissionPlan } from "../../planning/mission-planner.js";
+import { planMission } from "../../planning/planning-workflow.js";
 
 /**
  * Executa o comando `vera plan`.
  *
- * O fluxo atual é:
+ * Fluxo operacional atual:
  *
  * requisito
  * → inspeção do repositório
- * → criação da missão
- * → criação do plano determinístico
- * → apresentação do plano
+ * → criação da Mission
+ * → Planning Workflow
+ * → Mission planejada
+ * → MissionPlan
  *
- * Nesta fase ainda não existe utilização de
+ * A Planning Workflow é responsável por coordenar
+ * as transições:
+ *
+ * received
+ * → analyzing
+ * → planned
+ *
+ * Nesta etapa ainda não existe utilização de
  * Inteligência Artificial.
  *
  * @param args Argumentos recebidos após o comando `plan`.
@@ -23,22 +31,19 @@ export async function runPlanCommand(
   const currentDirectory = process.cwd();
 
   /**
-   * Combina todos os argumentos recebidos após `plan`
-   * em um único requisito.
+   * Todos os argumentos fornecidos após `plan`
+   * são reunidos para formar o requisito.
    *
-   * Isso permite chamadas como:
+   * Exemplo recomendado:
    *
-   * vera plan "Adicionar endpoint GET /health"
-   *
-   * ou:
-   *
-   * vera plan Adicionar endpoint GET /health
+   * vera plan "Adicionar endpoint GET /health com testes"
    */
   const requirement = args.join(" ").trim();
 
   /**
-   * Uma missão precisa obrigatoriamente possuir
-   * um requisito válido.
+   * Uma missão sem requisito não possui significado
+   * operacional e deve ser rejeitada antes de qualquer
+   * inspeção ou planejamento.
    */
   if (requirement.length === 0) {
     console.error("[ERROR] Nenhum requisito foi informado para a missão.");
@@ -57,25 +62,16 @@ export async function runPlanCommand(
 
   try {
     /**
-     * Cria uma missão utilizando o contexto técnico
-     * real do repositório atual.
+     * Cria a missão a partir do requisito e do estado
+     * técnico atual do repositório.
+     *
+     * Toda Mission nasce no estado "received".
      */
     const mission = await createRepositoryMission(
       currentDirectory,
       requirement,
     );
 
-    /**
-     * O Mission Planner recebe a missão já contextualizada
-     * e produz um plano determinístico.
-     *
-     * Nenhum arquivo é alterado nesta operação.
-     */
-    const plan = createMissionPlan(mission);
-
-    /**
-     * Informações da missão.
-     */
     console.log(`ID:      ${mission.id}`);
     console.log(`Status:  ${mission.status}`);
     console.log(`Criada:  ${mission.createdAt}`);
@@ -86,8 +82,7 @@ export async function runPlanCommand(
     console.log("");
 
     /**
-     * Contexto técnico utilizado durante
-     * a criação do plano.
+     * Contexto técnico associado à missão.
      */
     console.log("Contexto do repositório:");
 
@@ -118,13 +113,46 @@ export async function runPlanCommand(
     );
 
     /**
-     * Apresentação do plano.
+     * A partir deste ponto entregamos a Mission para
+     * a Planning Workflow.
+     *
+     * Internamente ela realiza:
+     *
+     * received
+     * → analyzing
+     * → criação do plano
+     * → planned
      */
+    console.log("");
+    console.log("[ANALYZE] Iniciando análise da missão...");
+
+    const planningResult = planMission(mission);
+
+    /**
+     * A Mission retornada pela workflow representa
+     * o novo estado operacional.
+     *
+     * A Mission original continua intacta devido
+     * ao modelo imutável adotado pelo lifecycle.
+     */
+    const plannedMission = planningResult.mission;
+
+    const plan = planningResult.plan;
+
+    console.log("[ANALYZE] Contexto analisado.");
+
     console.log("");
     console.log("[PLAN] Plano estabelecido.");
     console.log("");
 
-    console.log(`Status: ${plan.status}`);
+    /**
+     * Agora tanto a Mission quanto o MissionPlan
+     * devem apresentar estado "planned".
+     */
+    console.log(`Status da missão: ${plannedMission.status}`);
+
+    console.log(`Status do plano:  ${plan.status}`);
+
     console.log("");
 
     console.log("Objetivo:");
@@ -132,7 +160,7 @@ export async function runPlanCommand(
     console.log("");
 
     /**
-     * Etapas ordenadas do plano.
+     * Etapas ordenadas produzidas pelo Mission Planner.
      */
     console.log("Etapas:");
 
@@ -148,9 +176,6 @@ export async function runPlanCommand(
 
     /**
      * Riscos conhecidos antes da execução.
-     *
-     * Nesta fase são apresentados apenas riscos
-     * derivados de evidências determinísticas.
      */
     console.log("Riscos:");
 
@@ -165,8 +190,8 @@ export async function runPlanCommand(
     console.log("");
 
     /**
-     * Critérios objetivos utilizados futuramente
-     * pela etapa de verificação da missão.
+     * Critérios que futuramente serão utilizados
+     * pela Verification Workflow.
      */
     console.log("Critérios de aceitação:");
 
@@ -175,7 +200,7 @@ export async function runPlanCommand(
     }
 
     console.log("");
-    console.log("[STATUS] Missão planejada.");
+    console.log(`[STATUS] Missão ${plannedMission.status}.`);
 
     console.log("[READY] Plano pronto para a próxima etapa.");
 
@@ -194,7 +219,8 @@ export async function runPlanCommand(
     }
 
     /**
-     * package.json encontrado, porém inválido.
+     * package.json encontrado, porém contendo
+     * JSON inválido.
      */
     if (error instanceof SyntaxError) {
       console.error("[ERROR] package.json contém JSON inválido.");
@@ -204,7 +230,8 @@ export async function runPlanCommand(
     }
 
     /**
-     * Fallback para condições ainda não previstas.
+     * Fallback para qualquer falha inesperada
+     * durante criação ou planejamento da missão.
      */
     console.error("[ERROR] Não foi possível planejar a missão.");
 
