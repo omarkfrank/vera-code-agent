@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit && tsc --project tests/tsconfig.json --noEmit",
-    "test": "node --import=tsx --test tests/unit/technology-detector.test.ts tests/unit/package-manager-detector.test.ts tests/unit/configuration-file-detector.test.ts tests/unit/create-mission.test.ts tests/unit/mission-planner.test.ts tests/unit/mission-lifecycle.test.ts tests/unit/planning-workflow.test.ts tests/unit/prepare-mission-execution.test.ts tests/unit/protected-read-action.test.ts tests/unit/add-execution-action.test.ts tests/unit/register-execution-result.test.ts tests/unit/create-execution-failure-result.test.ts tests/integration/repository-inspector.test.ts tests/integration/create-repository-mission.test.ts tests/integration/execution-workflow.test.ts"
+    "test": "node --import=tsx --test tests/unit/technology-detector.test.ts tests/unit/package-manager-detector.test.ts tests/unit/configuration-file-detector.test.ts tests/unit/create-mission.test.ts tests/unit/mission-planner.test.ts tests/unit/mission-lifecycle.test.ts tests/unit/planning-workflow.test.ts tests/unit/prepare-mission-execution.test.ts tests/unit/protected-read-action.test.ts tests/unit/add-execution-action.test.ts tests/unit/register-execution-result.test.ts tests/unit/create-execution-failure-result.test.ts tests/unit/verify-execution-evidence.test.ts tests/unit/verification-workflow.test.ts tests/integration/repository-inspector.test.ts tests/integration/create-repository-mission.test.ts tests/integration/execution-workflow.test.ts"
   },
   "keywords": [],
   "author": "Mark Frank",
