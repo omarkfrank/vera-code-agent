@@ -1,29 +1,32 @@
 #!/usr/bin/env node
 
 import { runInspectCommand } from "./cli/commands/inspect-command.js";
+import { runPlanCommand } from "./cli/commands/plan-command.js";
 import { runStatusCommand } from "./cli/commands/status-command.js";
 import { printHelp } from "./cli/help.js";
 
 /**
- * Argumentos recebidos pela CLI.
+ * Argumentos fornecidos para a VERA.
  *
  * Exemplo:
  *
- * vera inspect --json
+ * vera plan "Adicionar endpoint GET /health"
  *
- * Após remover os dois primeiros argumentos internos do Node:
+ * Resultado:
  *
- * command = "inspect"
- * commandArguments = ["--json"]
+ * command = "plan"
+ * commandArguments = [
+ *   "Adicionar endpoint GET /health"
+ * ]
  */
 const [command, ...commandArguments] = process.argv.slice(2);
 
 /**
- * Direciona a execução para o comando solicitado.
+ * Roteamento principal da interface de linha de comando.
  *
- * O arquivo principal conhece apenas os comandos disponíveis.
- * As regras específicas de cada comando permanecem isoladas
- * em seus próprios módulos.
+ * O ponto de entrada conhece apenas quais comandos existem.
+ * A implementação de cada comportamento permanece isolada
+ * em seu respectivo módulo.
  */
 switch (command) {
   case "status":
@@ -32,6 +35,10 @@ switch (command) {
 
   case "inspect":
     await runInspectCommand(commandArguments);
+    break;
+
+  case "plan":
+    await runPlanCommand(commandArguments);
     break;
 
   case "help":

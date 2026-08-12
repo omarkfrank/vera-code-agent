@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit && tsc --project tests/tsconfig.json --noEmit",
-    "test": "node --import=tsx --test tests/unit/technology-detector.test.ts tests/unit/package-manager-detector.test.ts tests/unit/configuration-file-detector.test.ts tests/unit/create-mission.test.ts tests/integration/repository-inspector.test.ts"
+    "test": "node --import=tsx --test tests/unit/technology-detector.test.ts tests/unit/package-manager-detector.test.ts tests/unit/configuration-file-detector.test.ts tests/unit/create-mission.test.ts tests/unit/mission-planner.test.ts tests/integration/repository-inspector.test.ts tests/integration/create-repository-mission.test.ts"
   },
   "keywords": [],
   "author": "Mark Frank",
