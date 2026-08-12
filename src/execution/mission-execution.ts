@@ -9,12 +9,11 @@
 export type MissionExecutionStatus = "prepared";
 
 /**
- * Tipos de ações que futuramente poderão ser
- * executadas pela VERA sobre um repositório.
+ * Tipos de ações que poderão ser executadas
+ * pela VERA sobre um repositório.
  *
- * A declaração antecipada desse contrato permitirá
- * validar ações antes que elas alcancem filesystem,
- * shell ou outras capacidades operacionais.
+ * Apenas `read` começará a possuir implementação
+ * operacional neste estágio.
  */
 export type ExecutionActionType =
   | "read"
@@ -25,10 +24,7 @@ export type ExecutionActionType =
 
 /**
  * Representa uma ação individual preparada
- * para uma futura execução.
- *
- * Neste checkpoint ainda não criaremos ações reais.
- * O contrato apenas define como elas deverão existir.
+ * para uma execução.
  */
 export interface ExecutionAction {
   /**
@@ -54,24 +50,14 @@ export interface ExecutionAction {
   /**
    * Recurso alvo da operação.
    *
-   * Exemplos futuros:
-   *
-   * src/routes/health.ts
-   * package.json
-   * npm test
-   *
-   * null representa uma ação cujo alvo ainda
-   * não foi determinado.
+   * Para ações sobre arquivos, deve representar
+   * um caminho relativo à raiz do repositório.
    */
   target: string | null;
 }
 
 /**
  * Resultado possível de uma ação executada.
- *
- * Ainda não utilizaremos esse contrato neste marco,
- * mas ele estabelece a estrutura que posteriormente
- * receberá evidências da Execution Workflow.
  */
 export type ExecutionActionResultStatus = "success" | "failure" | "skipped";
 
@@ -81,7 +67,7 @@ export type ExecutionActionResultStatus = "success" | "failure" | "skipped";
  */
 export interface ExecutionActionResult {
   /**
-   * Ação que originou este resultado.
+   * Ação que originou o resultado.
    */
   actionId: string;
 
@@ -97,15 +83,31 @@ export interface ExecutionActionResult {
 }
 
 /**
+ * Resultado específico de uma ação de leitura.
+ *
+ * Mantemos esse contrato especializado porque
+ * uma leitura bem-sucedida também produz conteúdo.
+ */
+export interface ReadExecutionActionResult extends ExecutionActionResult {
+  /**
+   * Caminho relativo solicitado pela ação.
+   */
+  target: string;
+
+  /**
+   * Conteúdo textual encontrado no arquivo.
+   */
+  content: string;
+}
+
+/**
  * Representa uma execução preparada para uma missão.
  *
- * É importante distinguir:
+ * MissionPlan:
+ * descreve o que deve ser feito.
  *
- * MissionPlan
- * → descreve o que deve ser feito.
- *
- * MissionExecution
- * → representa como essas operações serão
+ * MissionExecution:
+ * representa como essas operações serão
  * preparadas, executadas e registradas.
  */
 export interface MissionExecution {
@@ -125,32 +127,25 @@ export interface MissionExecution {
   status: MissionExecutionStatus;
 
   /**
-   * Momento em que a execução foi preparada,
-   * armazenado em ISO 8601.
+   * Momento da preparação em ISO 8601.
    */
   preparedAt: string;
 
   /**
    * Operações preparadas para execução.
-   *
-   * Inicialmente permanece vazio.
    */
   actions: ExecutionAction[];
 
   /**
    * Arquivos que poderão sofrer alterações.
    *
-   * A lista começará vazia até que exista
-   * uma etapa responsável por determinar
-   * mudanças concretas.
+   * A leitura não deve adicionar arquivos
+   * a esta coleção.
    */
   affectedFiles: string[];
 
   /**
-   * Resultados produzidos durante a execução.
-   *
-   * Uma execução recém-preparada ainda não
-   * possui resultados.
+   * Resultados produzidos pelas operações.
    */
   results: ExecutionActionResult[];
 }
