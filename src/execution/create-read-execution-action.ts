@@ -17,16 +17,34 @@ export class InvalidExecutionActionDefinitionError extends Error {
 /**
  * Cria uma ação protegida de leitura.
  *
- * A função apenas descreve a operação.
+ * A função somente descreve a operação.
  * Nenhum arquivo é acessado neste momento.
  *
- * @param order Ordem da ação na execução.
+ * @param executionId Execução proprietária da ação.
+ * @param order Ordem da ação dentro da execução.
  * @param target Caminho relativo dentro do repositório.
  */
 export function createReadExecutionAction(
+  executionId: string,
   order: number,
   target: string,
 ): ExecutionAction {
+  const normalizedExecutionId = executionId.trim();
+
+  /**
+   * Toda ação precisa estar associada
+   * explicitamente a uma execução.
+   */
+  if (normalizedExecutionId.length === 0) {
+    throw new InvalidExecutionActionDefinitionError(
+      "A ação precisa estar associada a uma execução válida.",
+    );
+  }
+
+  /**
+   * A ordem precisa ser determinística
+   * e utilizar valores inteiros positivos.
+   */
   if (!Number.isInteger(order) || order < 1) {
     throw new InvalidExecutionActionDefinitionError(
       "A ordem da ação deve ser um número inteiro maior ou igual a 1.",
@@ -42,6 +60,7 @@ export function createReadExecutionAction(
   }
 
   return {
+    executionId: normalizedExecutionId,
     id: randomUUID(),
     order,
     type: "read",

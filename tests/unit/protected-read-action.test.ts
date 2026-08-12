@@ -20,13 +20,21 @@ import type { ExecutionAction } from "../../src/execution/mission-execution.js";
 
 import { RepositoryPathViolationError } from "../../src/execution/repository-path.js";
 
+const EXECUTION_ID = "protected-read-execution-001";
+
 describe("Protected Read Action", () => {
   /**
    * A fábrica deve produzir uma ação de leitura
-   * estruturada e pronta para validação operacional.
+   * associada explicitamente a uma execução.
    */
   it("deve criar uma ação de leitura válida", () => {
-    const action = createReadExecutionAction(1, "  src/main.ts  ");
+    const action = createReadExecutionAction(
+      EXECUTION_ID,
+      1,
+      "  src/main.ts  ",
+    );
+
+    assert.equal(action.executionId, EXECUTION_ID);
 
     assert.ok(action.id.length > 0);
 
@@ -38,24 +46,32 @@ describe("Protected Read Action", () => {
   });
 
   /**
-   * A definição da ação precisa possuir
-   * ordem válida e alvo não vazio.
+   * A definição precisa possuir:
+   *
+   * - execução;
+   * - ordem válida;
+   * - alvo válido.
    */
   it("deve rejeitar definição inválida de ação", () => {
     assert.throws(
-      () => createReadExecutionAction(0, "src/main.ts"),
+      () => createReadExecutionAction("   ", 1, "src/main.ts"),
       InvalidExecutionActionDefinitionError,
     );
 
     assert.throws(
-      () => createReadExecutionAction(1, "   "),
+      () => createReadExecutionAction(EXECUTION_ID, 0, "src/main.ts"),
+      InvalidExecutionActionDefinitionError,
+    );
+
+    assert.throws(
+      () => createReadExecutionAction(EXECUTION_ID, 1, "   "),
       InvalidExecutionActionDefinitionError,
     );
   });
 
   /**
-   * Um arquivo textual localizado dentro da raiz
-   * autorizada deve poder ser lido normalmente.
+   * Um arquivo textual dentro da raiz
+   * autorizada pode ser lido normalmente.
    */
   it("deve ler arquivo textual dentro do repositório", async () => {
     const directory = await mkdtemp(join(tmpdir(), "vera-protected-read-"));
@@ -69,7 +85,11 @@ describe("Protected Read Action", () => {
         "utf-8",
       );
 
-      const action = createReadExecutionAction(1, "src/example.ts");
+      const action = createReadExecutionAction(
+        EXECUTION_ID,
+        1,
+        "src/example.ts",
+      );
 
       const result = await executeReadAction(directory, action);
 
@@ -90,7 +110,7 @@ describe("Protected Read Action", () => {
 
   /**
    * Traversal utilizando `..` não pode permitir
-   * que a VERA leia arquivos externos.
+   * acesso a arquivos externos.
    */
   it("deve bloquear tentativa de escapar do repositório", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "vera-path-traversal-"));
@@ -106,7 +126,7 @@ describe("Protected Read Action", () => {
 
       const target = relative(repository, outsideFile);
 
-      const action = createReadExecutionAction(1, target);
+      const action = createReadExecutionAction(EXECUTION_ID, 1, target);
 
       await assert.rejects(
         executeReadAction(repository, action),
@@ -121,8 +141,7 @@ describe("Protected Read Action", () => {
   });
 
   /**
-   * Caminhos absolutos também são proibidos,
-   * mesmo quando apontam para um arquivo existente.
+   * Caminhos absolutos são proibidos.
    */
   it("deve bloquear caminho absoluto", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "vera-absolute-path-"));
@@ -132,7 +151,7 @@ describe("Protected Read Action", () => {
 
       await writeFile(outsideFile, "arquivo absoluto", "utf-8");
 
-      const action = createReadExecutionAction(1, outsideFile);
+      const action = createReadExecutionAction(EXECUTION_ID, 1, outsideFile);
 
       await assert.rejects(
         executeReadAction(workspace, action),
@@ -147,15 +166,21 @@ describe("Protected Read Action", () => {
   });
 
   /**
-   * O executor de leitura não deve aceitar
-   * ações pertencentes a outras categorias.
+   * O executor de leitura não aceita
+   * ações de outras categorias.
    */
   it("deve rejeitar ação que não seja read", async () => {
     const action: ExecutionAction = {
+      executionId: EXECUTION_ID,
+
       id: "invalid-read-action",
+
       order: 1,
+
       type: "update",
+
       description: "Operação inválida para este executor.",
+
       target: "src/main.ts",
     };
 
@@ -166,8 +191,8 @@ describe("Protected Read Action", () => {
   });
 
   /**
-   * A capacidade atual trabalha exclusivamente
-   * com arquivos, nunca diretórios.
+   * Diretórios não fazem parte da
+   * capacidade atual de leitura.
    */
   it("deve rejeitar diretórios", async () => {
     const directory = await mkdtemp(join(tmpdir(), "vera-read-directory-"));
@@ -175,7 +200,7 @@ describe("Protected Read Action", () => {
     try {
       await mkdir(join(directory, "src"));
 
-      const action = createReadExecutionAction(1, "src");
+      const action = createReadExecutionAction(EXECUTION_ID, 1, "src");
 
       await assert.rejects(
         executeReadAction(directory, action),
@@ -190,8 +215,8 @@ describe("Protected Read Action", () => {
   });
 
   /**
-   * Arquivos muito grandes não devem ser
-   * carregados arbitrariamente em memória.
+   * Arquivos excessivamente grandes não
+   * devem ser carregados arbitrariamente.
    */
   it("deve rejeitar arquivo acima do limite de leitura", async () => {
     const directory = await mkdtemp(join(tmpdir(), "vera-large-read-"));
@@ -203,7 +228,7 @@ describe("Protected Read Action", () => {
         "utf-8",
       );
 
-      const action = createReadExecutionAction(1, "large.txt");
+      const action = createReadExecutionAction(EXECUTION_ID, 1, "large.txt");
 
       await assert.rejects(
         executeReadAction(directory, action),
@@ -218,8 +243,8 @@ describe("Protected Read Action", () => {
   });
 
   /**
-   * A primeira versão da leitura é destinada
-   * exclusivamente a conteúdo textual.
+   * A leitura atual trabalha exclusivamente
+   * com conteúdo textual.
    */
   it("deve rejeitar conteúdo aparentemente binário", async () => {
     const directory = await mkdtemp(join(tmpdir(), "vera-binary-read-"));
@@ -227,7 +252,7 @@ describe("Protected Read Action", () => {
     try {
       await writeFile(join(directory, "binary.bin"), Buffer.from([0, 1, 2, 3]));
 
-      const action = createReadExecutionAction(1, "binary.bin");
+      const action = createReadExecutionAction(EXECUTION_ID, 1, "binary.bin");
 
       await assert.rejects(
         executeReadAction(directory, action),
