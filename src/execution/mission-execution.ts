@@ -1,18 +1,5 @@
 /**
  * Estado operacional de uma execução de missão.
- *
- * prepared:
- * a execução foi criada e pode receber ações.
- *
- * executing:
- * as ações registradas estão sendo processadas.
- *
- * completed:
- * todas as ações foram executadas com sucesso e
- * a missão pode avançar para verificação.
- *
- * failed:
- * uma operação falhou e a execução foi interrompida.
  */
 export type MissionExecutionStatus =
   | "prepared"
@@ -21,13 +8,11 @@ export type MissionExecutionStatus =
   | "failed";
 
 /**
- * Tipos de ações conhecidos pelo contrato
- * da camada de execução.
+ * Tipos de ações conhecidos pela camada
+ * de execução da VERA.
  *
- * Conhecer um tipo não significa autorizá-lo.
- *
- * Atualmente somente `read` possui autorização
- * operacional.
+ * Conhecer um tipo não significa que ele
+ * esteja autorizado pela workflow atual.
  */
 export type ExecutionActionType =
   | "read"
@@ -37,10 +22,9 @@ export type ExecutionActionType =
   | "command";
 
 /**
- * Representa uma ação individual associada
- * a uma MissionExecution.
+ * Campos comuns a todas as ações operacionais.
  */
-export interface ExecutionAction {
+interface BaseExecutionAction {
   /**
    * Execução proprietária da ação.
    */
@@ -57,20 +41,70 @@ export interface ExecutionAction {
   order: number;
 
   /**
-   * Categoria da ação.
-   */
-  type: ExecutionActionType;
-
-  /**
    * Descrição humana e técnica.
    */
   description: string;
 
   /**
-   * Recurso alvo.
+   * Recurso alvo da operação.
    */
   target: string | null;
 }
+
+/**
+ * Ação protegida de leitura.
+ */
+export interface ReadExecutionAction extends BaseExecutionAction {
+  type: "read";
+
+  /**
+   * Read sempre possui um arquivo alvo.
+   */
+  target: string;
+}
+
+/**
+ * Ação protegida de criação.
+ *
+ * Nesta primeira versão CREATE significa:
+ *
+ * "criar um NOVO arquivo textual".
+ *
+ * Sobrescrita não é permitida.
+ */
+export interface CreateExecutionAction extends BaseExecutionAction {
+  type: "create";
+
+  /**
+   * Arquivo relativo ao repositório.
+   */
+  target: string;
+
+  /**
+   * Conteúdo textual que será gravado.
+   */
+  content: string;
+}
+
+/**
+ * Operações conhecidas pelo contrato,
+ * porém ainda sem capacidade operacional.
+ */
+export interface RestrictedExecutionAction extends BaseExecutionAction {
+  type: "update" | "delete" | "command";
+}
+
+/**
+ * União discriminada das ações conhecidas.
+ *
+ * Essa estrutura permitirá à TypeScript
+ * compreender propriedades específicas de
+ * cada operação através do campo `type`.
+ */
+export type ExecutionAction =
+  | ReadExecutionAction
+  | CreateExecutionAction
+  | RestrictedExecutionAction;
 
 /**
  * Resultado operacional possível.
@@ -106,9 +140,6 @@ export interface ExecutionActionResult {
  * Resultado especializado de uma Read Action.
  */
 export interface ReadExecutionActionResult extends ExecutionActionResult {
-  /**
-   * Caminho relativo solicitado.
-   */
   target: string;
 
   /**
@@ -118,22 +149,37 @@ export interface ReadExecutionActionResult extends ExecutionActionResult {
 }
 
 /**
+ * Resultado especializado de uma Create Action.
+ */
+export interface CreateExecutionActionResult extends ExecutionActionResult {
+  /**
+   * Arquivo criado.
+   */
+  target: string;
+
+  /**
+   * Quantidade real de bytes UTF-8 gravados.
+   */
+  bytesWritten: number;
+}
+
+/**
  * Representa uma execução associada
  * a uma missão da VERA.
  */
 export interface MissionExecution {
   /**
-   * Identificador exclusivo da execução.
+   * Identificador exclusivo.
    */
   id: string;
 
   /**
-   * Missão proprietária da execução.
+   * Missão proprietária.
    */
   missionId: string;
 
   /**
-   * Estado operacional atual.
+   * Estado operacional.
    */
   status: MissionExecutionStatus;
 
@@ -143,19 +189,18 @@ export interface MissionExecution {
   preparedAt: string;
 
   /**
-   * Ações formalmente registradas.
+   * Ações registradas.
    */
   actions: ExecutionAction[];
 
   /**
-   * Arquivos modificados.
-   *
-   * Read Actions não adicionam itens aqui.
+   * Arquivos fisicamente modificados
+   * pela execução.
    */
   affectedFiles: string[];
 
   /**
-   * Evidências produzidas pelas ações.
+   * Evidências produzidas.
    */
   results: ExecutionActionResult[];
 }
