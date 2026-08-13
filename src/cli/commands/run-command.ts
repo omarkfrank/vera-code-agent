@@ -12,6 +12,7 @@ import type { ExecutionActionResult } from "../../execution/mission-execution.js
 export interface RunReadRequest {
   type: "read";
   target: string;
+  jsonOutput: boolean;
 }
 
 /**
@@ -21,6 +22,7 @@ export interface RunCreateRequest {
   type: "create";
   target: string;
   content: string;
+  jsonOutput: boolean;
 }
 
 /**
@@ -42,6 +44,29 @@ export class InvalidRunCommandArgumentsError extends Error {
 
     this.name = "InvalidRunCommandArgumentsError";
   }
+}
+
+/**
+ * Indica se `--json` foi solicitado na posição
+ * oficialmente suportada pela gramática da CLI.
+ *
+ * Nesta etapa a opção deve ser sempre o último
+ * argumento do comando.
+ */
+function hasJsonOutputOption(args: readonly string[]): boolean {
+  return args.length > 0 && args.at(-1) === "--json";
+}
+
+/**
+ * Remove a opção terminal `--json` antes
+ * da interpretação da operação.
+ */
+function removeJsonOutputOption(args: readonly string[]): readonly string[] {
+  if (!hasJsonOutputOption(args)) {
+    return args;
+  }
+
+  return args.slice(0, -1);
 }
 
 /**
@@ -68,19 +93,27 @@ function normalizeTarget(target: string | undefined): string {
  *
  * vera run read package.json
  *
+ * vera run read package.json --json
+ *
  * vera run create health.ts --content "export {};"
  *
- * Esta função é deliberadamente pura:
+ * vera run create health.ts --content "export {};" --json
+ *
+ * Esta função permanece pura:
  *
  * - não acessa filesystem;
  * - não executa missões;
  * - não modifica process.exitCode;
- * - apenas converte argumentos em um contrato tipado.
+ * - apenas converte argumentos em contrato tipado.
  */
 export function parseRunCommandArguments(
   args: readonly string[],
 ): RunCommandRequest {
-  const [operation, rawTarget, ...remainingArguments] = args;
+  const jsonOutput = hasJsonOutputOption(args);
+
+  const operationArguments = removeJsonOutputOption(args);
+
+  const [operation, rawTarget, ...remainingArguments] = operationArguments;
 
   if (operation === undefined) {
     throw new InvalidRunCommandArgumentsError(
@@ -93,16 +126,17 @@ export function parseRunCommandArguments(
       const target = normalizeTarget(rawTarget);
 
       /**
-       * READ possui somente:
+       * READ aceita:
        *
        * vera run read <target>
        *
-       * Argumentos adicionais são rejeitados
-       * para evitar interpretação ambígua.
+       * ou:
+       *
+       * vera run read <target> --json
        */
       if (remainingArguments.length > 0) {
         throw new InvalidRunCommandArgumentsError(
-          "A operação read aceita somente o arquivo alvo. Exemplo: vera run read package.json",
+          "A operação read aceita somente o arquivo alvo e a opção terminal --json. Exemplo: vera run read package.json --json",
         );
       }
 
@@ -110,6 +144,8 @@ export function parseRunCommandArguments(
         type: "read",
 
         target,
+
+        jsonOutput,
       };
     }
 
@@ -117,11 +153,13 @@ export function parseRunCommandArguments(
       const target = normalizeTarget(rawTarget);
 
       /**
-       * Sintaxe inicial e explícita:
+       * Sintaxe suportada:
        *
        * vera run create <target> --content <content>
        *
-       * Não utilizamos parsing permissivo nesta fase.
+       * opcionalmente:
+       *
+       * vera run create <target> --content <content> --json
        */
       if (remainingArguments.length === 0) {
         throw new InvalidRunCommandArgumentsError(
@@ -141,10 +179,8 @@ export function parseRunCommandArguments(
       /**
        * Diferenciamos:
        *
-       * --content ausente       → inválido
-       * --content ""            → válido
-       *
-       * Portanto não verificamos content.length.
+       * --content ausente → inválido
+       * --content ""      → válido
        */
       if (content === undefined) {
         throw new InvalidRunCommandArgumentsError(
@@ -164,6 +200,8 @@ export function parseRunCommandArguments(
         target,
 
         content,
+
+        jsonOutput,
       };
     }
 
@@ -228,11 +266,6 @@ function createRequirement(request: RunCommandRequest): string {
  *
  * vera run
  *
- * Importante:
- *
- * esta função NÃO acessa os executores
- * protegidos diretamente.
- *
  * Toda operação atravessa:
  *
  * Application Workflow
@@ -249,6 +282,8 @@ export async function runRunCommand(
 ): Promise<void> {
   let request: RunCommandRequest;
 
+  const jsonOutputRequested = hasJsonOutputOption(args);
+
   /**
    * Primeiro validamos exclusivamente
    * a interface da CLI.
@@ -257,9 +292,47 @@ export async function runRunCommand(
     request = parseRunCommandArguments(args);
   } catch (error: unknown) {
     if (error instanceof InvalidRunCommandArgumentsError) {
+      if (jsonOutputRequested) {
+        console.log(
+          JSON.stringify(
+            {
+              command: "run",
+
+              status: "error",
+
+              error: error.message,
+            },
+            null,
+            2,
+          ),
+        );
+
+        process.exitCode = 1;
+        return;
+      }
+
       console.error(`[ERROR] ${error.message}`);
 
       console.error('Use "vera help" para consultar a sintaxe disponível.');
+
+      process.exitCode = 1;
+      return;
+    }
+
+    if (jsonOutputRequested) {
+      console.log(
+        JSON.stringify(
+          {
+            command: "run",
+
+            status: "error",
+
+            error: "Não foi possível interpretar o comando run.",
+          },
+          null,
+          2,
+        ),
+      );
 
       process.exitCode = 1;
       return;
@@ -271,26 +344,27 @@ export async function runRunCommand(
     return;
   }
 
-  console.log("");
-  console.log("[MISSION] Iniciando workflow completo...");
-  console.log("");
+  /**
+   * No modo humano mostramos o início
+   * da missão antes da execução.
+   *
+   * Em JSON stdout precisa permanecer puro.
+   */
+  if (!request.jsonOutput) {
+    console.log("");
+    console.log("[MISSION] Iniciando workflow completo...");
+    console.log("");
 
-  console.log(`Operação: ${request.type.toUpperCase()}`);
+    console.log(`Operação: ${request.type.toUpperCase()}`);
 
-  console.log(`Alvo:     ${request.target}`);
+    console.log(`Alvo:     ${request.target}`);
 
-  console.log("");
+    console.log("");
+  }
 
   try {
     const requirement = createRequirement(request);
 
-    /**
-     * O Application Workflow recebe uma factory.
-     *
-     * Somente após PREPARE conhecemos o executionId
-     * real que obrigatoriamente precisa ser associado
-     * à ação.
-     */
     const result = await runRepositoryMissionWorkflow(
       currentDirectory,
       requirement,
@@ -312,39 +386,120 @@ export async function runRunCommand(
       },
     );
 
-    console.log(`[MISSION] ID: ${result.mission.id}`);
-
-    console.log(`[PLAN] Status: ${result.plan.status}`);
-
-    console.log(`[EXECUTE] Status: ${result.execution.status}`);
-
     /**
      * Falha operacional.
      *
-     * Nesse cenário o Application Workflow
-     * corretamente não executa VERIFY.
+     * Nesse cenário EXECUTE já encerrou
+     * formalmente a Mission em failed.
      */
     if (result.mission.status === "failed") {
       const failureResult = result.execution.results.find(
         (executionResult) => executionResult.status === "failure",
       );
 
+      const failureMessage =
+        failureResult?.message ?? "A missão não pôde ser concluída.";
+
+      if (request.jsonOutput) {
+        console.log(
+          JSON.stringify(
+            {
+              command: "run",
+
+              operation: request.type,
+
+              target: request.target,
+
+              status: "failed",
+
+              mission: {
+                id: result.mission.id,
+
+                status: result.mission.status,
+              },
+
+              plan: {
+                status: result.plan.status,
+              },
+
+              execution: {
+                id: result.execution.id,
+
+                status: result.execution.status,
+
+                affectedFiles: result.execution.affectedFiles,
+              },
+
+              verification: null,
+
+              error: failureMessage,
+            },
+            null,
+            2,
+          ),
+        );
+
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(`[MISSION] ID: ${result.mission.id}`);
+
+      console.log(`[PLAN] Status: ${result.plan.status}`);
+
+      console.log(`[EXECUTE] Status: ${result.execution.status}`);
+
       console.error("");
       console.error("[FAILED] A missão não pôde ser concluída.");
 
-      if (failureResult !== undefined) {
-        console.error(`[EVIDENCE] ${failureResult.message}`);
-      }
+      console.error(`[EVIDENCE] ${failureMessage}`);
 
       process.exitCode = 1;
       return;
     }
 
     /**
-     * Uma missão não-failed precisa ter passado
-     * formalmente pela Verification Workflow.
+     * Uma missão não-failed precisa possuir
+     * evidência formal de VERIFY.
      */
     if (result.verification === null) {
+      if (request.jsonOutput) {
+        console.log(
+          JSON.stringify(
+            {
+              command: "run",
+
+              operation: request.type,
+
+              target: request.target,
+
+              status: "error",
+
+              mission: {
+                id: result.mission.id,
+
+                status: result.mission.status,
+              },
+
+              execution: {
+                id: result.execution.id,
+
+                status: result.execution.status,
+              },
+
+              verification: null,
+
+              error: "A missão terminou sem evidência de verificação.",
+            },
+            null,
+            2,
+          ),
+        );
+
+        process.exitCode = 1;
+        return;
+      }
+
       console.error("");
       console.error("[ERROR] A missão terminou sem evidência de verificação.");
 
@@ -352,12 +507,117 @@ export async function runRunCommand(
       return;
     }
 
-    console.log(`[VERIFY] Status: ${result.verification.status}`);
+    /**
+     * Saída estruturada para automações.
+     */
+    if (request.jsonOutput) {
+      switch (request.type) {
+        case "read": {
+          console.log(
+            JSON.stringify(
+              {
+                command: "run",
+
+                operation: request.type,
+
+                target: request.target,
+
+                status: "completed",
+
+                mission: {
+                  id: result.mission.id,
+
+                  status: result.mission.status,
+                },
+
+                plan: {
+                  status: result.plan.status,
+                },
+
+                execution: {
+                  id: result.execution.id,
+
+                  status: result.execution.status,
+
+                  affectedFiles: result.execution.affectedFiles,
+                },
+
+                verification: {
+                  status: result.verification.status,
+                },
+
+                result: {
+                  content: findReadContent(result.execution.results),
+                },
+              },
+              null,
+              2,
+            ),
+          );
+
+          return;
+        }
+
+        case "create": {
+          console.log(
+            JSON.stringify(
+              {
+                command: "run",
+
+                operation: request.type,
+
+                target: request.target,
+
+                status: "completed",
+
+                mission: {
+                  id: result.mission.id,
+
+                  status: result.mission.status,
+                },
+
+                plan: {
+                  status: result.plan.status,
+                },
+
+                execution: {
+                  id: result.execution.id,
+
+                  status: result.execution.status,
+
+                  affectedFiles: result.execution.affectedFiles,
+                },
+
+                verification: {
+                  status: result.verification.status,
+                },
+
+                result: {
+                  bytesWritten: findBytesWritten(result.execution.results),
+                },
+              },
+              null,
+              2,
+            ),
+          );
+
+          return;
+        }
+      }
+    }
 
     /**
-     * READ exibe o conteúdo obtido pela própria
-     * evidência da Execution Workflow.
+     * A partir daqui temos somente
+     * apresentação destinada ao usuário humano.
      */
+    console.log(`[MISSION] ID: ${result.mission.id}`);
+
+    console.log(`[PLAN] Status: ${result.plan.status}`);
+
+    console.log(`[EXECUTE] Status: ${result.execution.status}`);
+
+    console.log(`[VERIFY] Status: ${result.verification.status}`);
+
     if (request.type === "read") {
       const content = findReadContent(result.execution.results);
 
@@ -368,10 +628,6 @@ export async function runRunCommand(
       }
     }
 
-    /**
-     * CREATE apresenta a evidência física
-     * de gravação produzida pelo executor.
-     */
     if (request.type === "create") {
       const bytesWritten = findBytesWritten(result.execution.results);
 
@@ -389,10 +645,34 @@ export async function runRunCommand(
     console.log("");
   } catch (error: unknown) {
     /**
-     * Mantemos o mesmo padrão dos comandos
-     * inspect e plan para repositórios inválidos.
+     * Diretório sem package.json.
      */
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      if (request.jsonOutput) {
+        console.log(
+          JSON.stringify(
+            {
+              command: "run",
+
+              operation: request.type,
+
+              target: request.target,
+
+              status: "error",
+
+              error: "package.json não encontrado.",
+
+              directory: currentDirectory,
+            },
+            null,
+            2,
+          ),
+        );
+
+        process.exitCode = 1;
+        return;
+      }
+
       console.error("[ERROR] package.json não encontrado.");
 
       console.error(`Diretório analisado: ${currentDirectory}`);
@@ -401,7 +681,33 @@ export async function runRunCommand(
       return;
     }
 
+    /**
+     * package.json inválido.
+     */
     if (error instanceof SyntaxError) {
+      if (request.jsonOutput) {
+        console.log(
+          JSON.stringify(
+            {
+              command: "run",
+
+              operation: request.type,
+
+              target: request.target,
+
+              status: "error",
+
+              error: "package.json contém JSON inválido.",
+            },
+            null,
+            2,
+          ),
+        );
+
+        process.exitCode = 1;
+        return;
+      }
+
       console.error("[ERROR] package.json contém JSON inválido.");
 
       process.exitCode = 1;
@@ -409,9 +715,32 @@ export async function runRunCommand(
     }
 
     /**
-     * Não expomos stack trace ou detalhes internos
-     * pela interface normal da CLI.
+     * Fallback para falhas estruturais
+     * não previstas.
      */
+    if (request.jsonOutput) {
+      console.log(
+        JSON.stringify(
+          {
+            command: "run",
+
+            operation: request.type,
+
+            target: request.target,
+
+            status: "error",
+
+            error: "Não foi possível executar a missão.",
+          },
+          null,
+          2,
+        ),
+      );
+
+      process.exitCode = 1;
+      return;
+    }
+
     console.error("[ERROR] Não foi possível executar a missão.");
 
     process.exitCode = 1;

@@ -28,6 +28,10 @@ Operações de run:
                     Cria um novo arquivo textual sem sobrescrever
                     arquivos existentes.
 
+Opções de run:
+  --json            Retorna o resultado da missão em JSON estruturado.
+                    Deve ser informado como último argumento.
+
 Exemplos:
   vera status
 
@@ -39,7 +43,11 @@ Exemplos:
 
   vera run read package.json
 
+  vera run read package.json --json
+
   vera run create health.ts --content 'export const health = "ok";'
+
+  vera run create health.ts --content 'export const health = "ok";' --json
 
   vera run create empty.txt --content ""
 
