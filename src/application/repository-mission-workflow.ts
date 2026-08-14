@@ -17,20 +17,24 @@ import type { MissionPlan } from "../planning/mission-plan.js";
 
 import { planMission } from "../planning/planning-workflow.js";
 
+import type { ActionProposalProvider } from "../proposal/action-proposal-provider.js";
+
+import type { ActionProposal } from "../proposal/action-proposal.js";
+
+import { materializeActionProposal } from "../proposal/proposal-materializer.js";
+
 import type { MissionVerification } from "../verification/mission-verification.js";
 
 import { verifyMissionExecution } from "../verification/verification-workflow.js";
 
 /**
- * Fábrica responsável por produzir as ações
- * depois que a execução possuir um ID real.
+ * Fábrica responsável por produzir ações
+ * operacionais depois que a execução possui
+ * um identificador real.
  *
- * A factory pode ser síncrona ou assíncrona.
- *
- * Isso mantém a camada preparada para uma
- * futura fonte externa de ações — inclusive IA —
- * sem conceder a ela autoridade para executar
- * diretamente operações no repositório.
+ * Este contrato permanece disponível para
+ * preservar compatibilidade com o fluxo já
+ * existente da aplicação.
  */
 export type MissionActionFactory = (
   executionId: string,
@@ -39,15 +43,6 @@ export type MissionActionFactory = (
 /**
  * Resultado consolidado do ciclo completo
  * de uma missão de repositório.
- *
- * A aplicação preserva explicitamente:
- *
- * - Mission;
- * - MissionPlan;
- * - MissionExecution;
- * - MissionVerification.
- *
- * Dessa forma cada etapa permanece rastreável.
  */
 export interface RepositoryMissionWorkflowResult {
   mission: Mission;
@@ -60,64 +55,61 @@ export interface RepositoryMissionWorkflowResult {
    * Uma falha operacional durante EXECUTE
    * encerra a missão diretamente em failed.
    *
-   * Nesse caso VERIFY não deve ser executado,
-   * portanto não existe MissionVerification.
+   * Nesse caso VERIFY não deve ser executado.
    */
   verification: MissionVerification | null;
 }
 
 /**
- * Orquestra o ciclo determinístico completo
- * atualmente suportado pela VERA.
+ * Resultado especializado do fluxo orientado
+ * a ActionProposal.
  *
- * Fluxo nominal:
+ * Além das evidências normais da missão,
+ * preservamos também a proposta responsável
+ * pela materialização das ações.
+ */
+export interface ProposalDrivenRepositoryMissionWorkflowResult extends RepositoryMissionWorkflowResult {
+  proposal: ActionProposal;
+}
+
+/**
+ * Contexto interno produzido antes que qualquer
+ * ação operacional seja registrada.
  *
- * requirement
- *     ↓
+ * Neste ponto:
+ *
+ * - a missão já está planned;
+ * - a execução já possui ID real;
+ * - nenhuma ação foi registrada;
+ * - nada foi executado.
+ */
+interface PreparedRepositoryMissionContext {
+  mission: Mission;
+
+  plan: MissionPlan;
+
+  execution: MissionExecution;
+}
+
+/**
+ * Executa as etapas comuns de preparação
+ * de uma missão de repositório.
+ *
  * UNDERSTAND
- *     ↓
- * received
  *     ↓
  * PLAN
  *     ↓
- * planned
- *     ↓
  * PREPARE
- *     ↓
- * prepared execution
- *     ↓
- * action factory
- *     ↓
- * authorization / registration
- *     ↓
- * EXECUTE
- *     ↓
- * verifying
- *     ↓
- * VERIFY
- *     ↓
- * completed / failed
- *
- * Importante:
- *
- * esta camada NÃO implementa regras de
- * autorização de filesystem.
- *
- * Ela apenas coordena componentes existentes.
- *
- * As políticas continuam pertencendo às
- * respectivas camadas de execução.
  */
-export async function runRepositoryMissionWorkflow(
+async function prepareRepositoryMissionContext(
   directory: string,
   requirement: string,
-  createActions: MissionActionFactory,
-): Promise<RepositoryMissionWorkflowResult> {
+): Promise<PreparedRepositoryMissionContext> {
   /**
    * UNDERSTAND
    *
    * Inspeciona o repositório e cria
-   * a missão no estado received.
+   * a missão inicialmente em received.
    */
   const receivedMission = await createRepositoryMission(directory, requirement);
 
@@ -135,30 +127,51 @@ export async function runRepositoryMissionWorkflow(
   /**
    * PREPARE
    *
-   * Somente agora nasce execution.id.
+   * Somente aqui nasce execution.id.
    */
   const preparedExecution = prepareMissionExecution(
     planningResult.mission,
     planningResult.plan,
   );
 
-  /**
-   * Produzimos as ações somente depois
-   * da criação da execução.
-   *
-   * Isso evita IDs artificiais ou a necessidade
-   * de alterar actions posteriormente.
-   */
-  const actions = await createActions(preparedExecution.id);
+  return {
+    mission: planningResult.mission,
 
+    plan: planningResult.plan,
+
+    execution: preparedExecution,
+  };
+}
+
+/**
+ * Registra, executa e verifica um conjunto
+ * de ExecutionActions já materializadas.
+ *
+ * Esta função é compartilhada pelos dois
+ * caminhos atualmente suportados:
+ *
+ * - MissionActionFactory;
+ * - ActionProposalProvider.
+ *
+ * Importante:
+ *
+ * receber uma ExecutionAction não significa
+ * confiar automaticamente nela.
+ *
+ * Cada ação continua obrigatoriamente passando
+ * por addExecutionAction().
+ */
+async function completeRepositoryMissionWorkflow(
+  context: PreparedRepositoryMissionContext,
+  actions: readonly ExecutionAction[],
+): Promise<RepositoryMissionWorkflowResult> {
   /**
-   * Cada ação ainda precisa passar pela
-   * camada oficial de autorização.
+   * AUTHORIZATION / REGISTRATION
    *
-   * O orchestrator não contorna
-   * addExecutionAction().
+   * O orchestrator não contorna a camada
+   * oficial de registro de ações.
    */
-  let registeredExecution = preparedExecution;
+  let registeredExecution = context.execution;
 
   for (const action of actions) {
     registeredExecution = addExecutionAction(registeredExecution, action);
@@ -167,34 +180,29 @@ export async function runRepositoryMissionWorkflow(
   /**
    * EXECUTE
    *
-   * A workflow operacional decide entre:
-   *
-   * sucesso:
-   * planned → executing → verifying
-   *
-   * falha:
-   * planned → executing → failed
+   * A workflow operacional continua sendo
+   * responsável por suas próprias políticas.
    */
   const executionResult = await executeMissionActions(
-    planningResult.mission,
+    context.mission,
     registeredExecution,
   );
 
   /**
-   * Uma falha operacional já produziu:
+   * Uma falha operacional produz:
    *
    * - Mission(failed);
    * - MissionExecution(failed);
-   * - failure evidence.
+   * - evidência failure.
    *
-   * Como failed é terminal, não devemos
-   * fabricar uma etapa VERIFY depois disso.
+   * Como failed é terminal, VERIFY
+   * não deve ser artificialmente executado.
    */
   if (executionResult.mission.status === "failed") {
     return {
       mission: executionResult.mission,
 
-      plan: planningResult.plan,
+      plan: context.plan,
 
       execution: executionResult.execution,
 
@@ -216,10 +224,133 @@ export async function runRepositoryMissionWorkflow(
   return {
     mission: verificationResult.mission,
 
-    plan: planningResult.plan,
+    plan: context.plan,
 
     execution: executionResult.execution,
 
     verification: verificationResult.verification,
+  };
+}
+
+/**
+ * Orquestra o ciclo já existente baseado
+ * diretamente em uma MissionActionFactory.
+ *
+ * Este entry point permanece compatível com
+ * consumidores atuais da VERA.
+ *
+ * Fluxo:
+ *
+ * requirement
+ *     ↓
+ * UNDERSTAND
+ *     ↓
+ * PLAN
+ *     ↓
+ * PREPARE
+ *     ↓
+ * MissionActionFactory
+ *     ↓
+ * addExecutionAction
+ *     ↓
+ * EXECUTE
+ *     ↓
+ * VERIFY
+ */
+export async function runRepositoryMissionWorkflow(
+  directory: string,
+  requirement: string,
+  createActions: MissionActionFactory,
+): Promise<RepositoryMissionWorkflowResult> {
+  const context = await prepareRepositoryMissionContext(directory, requirement);
+
+  /**
+   * As ações são produzidas somente depois
+   * da criação da execução real.
+   */
+  const actions = await createActions(context.execution.id);
+
+  return completeRepositoryMissionWorkflow(context, actions);
+}
+
+/**
+ * Orquestra o ciclo completo utilizando
+ * uma ActionProposal como fonte das ações.
+ *
+ * Fluxo:
+ *
+ * requirement
+ *     ↓
+ * UNDERSTAND
+ *     ↓
+ * PLAN
+ *     ↓
+ * PREPARE
+ *     ↓
+ * ActionProposalProvider
+ *     ↓
+ * ActionProposal
+ *     ↓
+ * Proposal Materializer
+ *     ↓
+ * ExecutionAction[]
+ *     ↓
+ * addExecutionAction
+ *     ↓
+ * EXECUTE
+ *     ↓
+ * VERIFY
+ *
+ * A existência deste fluxo NÃO concede
+ * autoridade adicional ao provider.
+ *
+ * O provider apenas propõe.
+ *
+ * O materializer apenas converte.
+ *
+ * A execução continua protegida pelas
+ * mesmas camadas já existentes.
+ */
+export async function runRepositoryMissionWorkflowFromProposal<TInput>(
+  directory: string,
+  requirement: string,
+  provider: ActionProposalProvider<TInput>,
+  input: TInput,
+): Promise<ProposalDrivenRepositoryMissionWorkflowResult> {
+  const context = await prepareRepositoryMissionContext(directory, requirement);
+
+  /**
+   * PROPOSE
+   *
+   * A proposta é vinculada à missão planejada,
+   * mas ainda não possui poder operacional.
+   */
+  const proposal = await provider.propose(context.mission.id, input);
+
+  /**
+   * MATERIALIZE
+   *
+   * A proposta recebe o executionId real
+   * através das factories oficiais.
+   *
+   * Nenhuma ação é registrada ou executada
+   * pelo materializer.
+   */
+  const actions = materializeActionProposal(proposal, context.execution);
+
+  /**
+   * A partir daqui seguimos exatamente
+   * pelas mesmas barreiras utilizadas
+   * pelo fluxo tradicional.
+   */
+  const workflowResult = await completeRepositoryMissionWorkflow(
+    context,
+    actions,
+  );
+
+  return {
+    ...workflowResult,
+
+    proposal,
   };
 }
